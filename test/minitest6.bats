@@ -1,0 +1,209 @@
+load "testlib"
+
+SCRATCH=tmp/minitest6-tests
+
+setup() {
+  require_gem "minitest" "~> 6.0"
+  rm -rf $SCRATCH
+  mkdir -p $SCRATCH
+}
+
+teardown() {
+  rm -rf $SCRATCH
+}
+
+@test "minitest-queue (minitest6) succeeds when all tests pass" {
+  run bundle exec minitest-queue ./test/examples/*_minitest6.rb
+  assert_status 0
+  assert_output_contains "Starting test-queue master"
+}
+
+@test "minitest-queue (minitest6) succeeds when all tests pass with the --seed option" {
+  run bundle exec minitest-queue --seed 1234 ./test/examples/*_minitest6.rb
+  assert_status 0
+  assert_output_contains "Run options: --seed 1234"
+  assert_output_contains "Starting test-queue master"
+}
+
+@test "minitest-queue (minitest6) succeeds when all tests pass with the SEED env variable" {
+  export SEED=1234
+  run bundle exec minitest-queue ./test/examples/*_minitest6.rb
+  assert_status 0
+  assert_output_contains "Run options: --seed 1234"
+  assert_output_contains "Starting test-queue master"
+}
+
+@test "minitest-queue (minitest6) fails when a test fails" {
+  export FAIL=1
+  run bundle exec minitest-queue ./test/examples/*_minitest6.rb
+  assert_status 1
+  assert_output_contains "Starting test-queue master"
+  assert_output_contains "1) Failure:"
+  assert_output_contains "MinitestFailure#test_fail"
+}
+
+@test "TEST_QUEUE_FORCE allowlists certain tests" {
+  export TEST_QUEUE_WORKERS=1 TEST_QUEUE_FORCE="MinitestSleep11,MinitestSleep8"
+  run bundle exec minitest-queue ./test/examples/*_minitest6.rb
+  assert_status 0
+  assert_output_contains "Starting test-queue master"
+  assert_output_contains "MinitestSleep11"
+  assert_output_contains "MinitestSleep8"
+  refute_output_contains "MinitestSleep9"
+}
+
+assert_test_queue_force_ordering() {
+  run bundle exec minitest-queue "$@"
+  assert_status 0
+  assert_output_contains "Starting test-queue master"
+
+  # Turn the list of suites that were run into a comma-separated list. Input
+  # looks like:
+  #     SuiteName: .  <0.001>
+  actual_tests=$(echo "$output" | \
+                 egrep '^    .*: \.+  <' | \
+                 sed -E -e 's/^    (.*): \.+.*/\1/' | \
+                 tr '\n' ',' | \
+                 sed -e 's/,$//')
+  assert_equal "$TEST_QUEUE_FORCE" "$actual_tests"
+}
+
+@test "TEST_QUEUE_FORCE ensures test ordering" {
+  export TEST_QUEUE_WORKERS=1 TEST_QUEUE_FORCE="Meme::when asked about cheeseburgers,MinitestEqual"
+
+  # Without stats file
+  rm -f .test_queue_stats
+  assert_test_queue_force_ordering ./test/examples/example_minitest6.rb ./test/examples/example_minispec6.rb
+  rm -f .test_queue_stats
+  assert_test_queue_force_ordering ./test/examples/example_minispec6.rb ./test/examples/example_minitest6.rb
+
+  # With stats file
+  assert_test_queue_force_ordering ./test/examples/example_minitest6.rb ./test/examples/example_minispec6.rb
+  assert_test_queue_force_ordering ./test/examples/example_minispec6.rb ./test/examples/example_minitest6.rb
+}
+
+@test "minitest-queue fails if TEST_QUEUE_FORCE specifies nonexistent tests" {
+  export TEST_QUEUE_WORKERS=1 TEST_QUEUE_FORCE="MinitestSleep11,DoesNotExist"
+  run bundle exec minitest-queue ./test/examples/*_minitest6.rb
+  assert_status 1
+  assert_output_contains "Failed to discover DoesNotExist specified in TEST_QUEUE_FORCE"
+}
+
+@test "multi-master central master succeeds when all tests pass" {
+  export TEST_QUEUE_RELAY_TOKEN=$(date | cksum | cut -d' ' -f1)
+  export SLEEP_AS_RELAY=1
+  TEST_QUEUE_RELAY=0.0.0.0:12345 bundle exec ruby ./test/sleepy_runner.rb ./test/examples/example_minitest6.rb || true &
+  sleep 0.1
+  TEST_QUEUE_SOCKET=0.0.0.0:12345 run bundle exec ruby ./test/sleepy_runner.rb ./test/examples/example_minitest6.rb
+  wait
+
+  assert_status 0
+  assert_output_contains "Starting test-queue master"
+}
+
+@test "multi-master remote master succeeds when all tests pass" {
+  export TEST_QUEUE_RELAY_TOKEN=$(date | cksum | cut -d' ' -f1)
+  export SLEEP_AS_MASTER=1
+  TEST_QUEUE_SOCKET=0.0.0.0:12345 bundle exec ruby ./test/sleepy_runner.rb ./test/examples/example_minitest6.rb || true &
+  sleep 0.1
+  TEST_QUEUE_RELAY=0.0.0.0:12345 run bundle exec ruby ./test/sleepy_runner.rb ./test/examples/example_minitest6.rb
+  wait
+
+  assert_status 0
+  assert_output_contains "Starting test-queue master"
+}
+
+@test "multi-master central master fails when a test fails" {
+  export FAIL=1
+  export SLEEP_AS_RELAY=1
+  export TEST_QUEUE_RELAY_TOKEN=$(date | cksum | cut -d' ' -f1)
+  TEST_QUEUE_RELAY=0.0.0.0:12345 bundle exec ruby ./test/sleepy_runner.rb ./test/examples/example_minitest6.rb || true &
+  sleep 0.1
+  TEST_QUEUE_SOCKET=0.0.0.0:12345 run bundle exec ruby ./test/sleepy_runner.rb ./test/examples/example_minitest6.rb
+  wait
+
+  assert_status 1
+  assert_output_contains "Starting test-queue master"
+  assert_output_contains "1) Failure:"
+  assert_output_contains "MinitestFailure#test_fail"
+}
+
+@test "multi-master remote master fails when a test fails" {
+  export FAIL=1
+  export SLEEP_AS_MASTER=1
+  export TEST_QUEUE_RELAY_TOKEN=$(date | cksum | cut -d' ' -f1)
+  TEST_QUEUE_SOCKET=0.0.0.0:12345 bundle exec ruby ./test/sleepy_runner.rb ./test/examples/example_minitest6.rb || true &
+  sleep 0.1
+  TEST_QUEUE_RELAY=0.0.0.0:12345 run bundle exec ruby ./test/sleepy_runner.rb ./test/examples/example_minitest6.rb
+  wait
+
+  assert_status 1
+  assert_output_contains "Starting test-queue master"
+  assert_output_contains "1) Failure:"
+  assert_output_contains "MinitestFailure#test_fail"
+}
+
+@test "multi-master central master prints out remote master messages" {
+  export TEST_QUEUE_RELAY_TOKEN=$(date | cksum | cut -d' ' -f1)
+  TEST_QUEUE_RELAY=0.0.0.0:12345 TEST_QUEUE_REMOTE_MASTER_MESSAGE="hello from remote master" bundle exec minitest-queue ./test/examples/example_minitest6.rb &
+  TEST_QUEUE_SOCKET=0.0.0.0:12345 run bundle exec minitest-queue ./test/examples/example_minitest6.rb
+  wait
+
+  assert_status 0
+  assert_output_contains "hello from remote master"
+}
+
+@test "recovers from child processes dying in an unorderly way" {
+  export KILL=1
+  run bundle exec minitest-queue ./test/examples/example_minitest6.rb
+  assert_status 1
+  assert_output_contains "SIGKILL (signal 9)"
+}
+
+@test "minitest-queue fails when TEST_QUEUE_WORKERS is <= 0" {
+  export TEST_QUEUE_WORKERS=0
+  run bundle exec minitest-queue ./test/examples/example_minitest6.rb
+  assert_status 1
+  assert_output_contains "Worker count (0) must be greater than 0"
+}
+
+@test "minitest-queue fails when given a missing test file" {
+  run bundle exec minitest-queue ./test/examples/does_not_exist.rb
+  assert_status 1
+  assert_output_contains "Aborting: Discovering suites failed"
+}
+
+@test "minitest-queue fails when given a malformed test file" {
+  [ -f README.md ]
+  run bundle exec minitest-queue README.md
+  assert_status 1
+  assert_output_contains "Aborting: Discovering suites failed"
+}
+
+@test "minitest-queue handles test file being deleted" {
+  cp test/examples/example_minitest6.rb test/examples/example_minispec6.rb $SCRATCH
+
+  run bundle exec minitest-queue $SCRATCH/*
+  assert_status 0
+  assert_output_contains "Meme::when asked about blending possibilities"
+
+  rm $SCRATCH/example_minispec6.rb
+
+  run bundle exec minitest-queue $SCRATCH/*
+  assert_status 0
+  refute_output_contains "Meme::when asked about blending possibilities"
+}
+
+@test "minitest-queue handles suites changing inside a file" {
+  cp test/examples/example_minispec6.rb $SCRATCH
+
+  run bundle exec minitest-queue $SCRATCH/example_minispec6.rb
+  assert_status 0
+  assert_output_contains "Meme::when asked about blending possibilities"
+
+  sed -i'' -e 's/Meme/Meme2/g' $SCRATCH/example_minispec6.rb
+
+  run bundle exec minitest-queue $SCRATCH/example_minispec6.rb
+  assert_status 0
+  assert_output_contains "Meme2::when asked about blending possibilities"
+}

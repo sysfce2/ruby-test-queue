@@ -2,9 +2,14 @@
 
 require 'minitest'
 
-raise 'requires Minitest version 5' unless Minitest::VERSION.to_i == 5
-
-require_relative '../runner/minitest5'
+case Minitest::VERSION.to_i
+when 5
+  require_relative '../runner/minitest5'
+when 6
+  require_relative '../runner/minitest6'
+else
+  raise 'requires Minitest version 5 or 6'
+end
 
 module TestQueue
   class Runner
