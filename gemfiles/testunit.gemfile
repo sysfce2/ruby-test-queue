@@ -4,6 +4,9 @@
 
 source 'https://rubygems.org'
 
-gem 'test-unit'
+# test-unit 3.7.4 changed `TestSuite#run` method signature.
+# Earlier versions cause ArgumentError in test-queue's TestSuite subclass,
+# crashing workers and causing the master process to hang indefinitely.
+gem 'test-unit', '>= 3.7.4'
 
 gemspec path: '../'
