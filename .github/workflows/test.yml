@@ -24,10 +24,15 @@ jobs:
           - { name: cucumber1_3, bats: test/cucumber.bats }
           - { name: cucumber2_4, bats: test/cucumber.bats }
           - { name: minitest5, bats: test/minitest5.bats }
+          - { name: minitest6, bats: test/minitest6.bats }
           - { name: rspec3, bats: test/rspec3.bats }
           - { name: rspec4, bats: test/rspec4.bats }
           - { name: testunit, bats: test/testunit.bats }
           - { name: turnip, bats: test/turnip.bats }
+        exclude:
+          # Minitest 6 requires Ruby 3.2+
+          - ruby: '2.7'
+            entry: { name: minitest6, bats: test/minitest6.bats }
 
     steps:
       - name: checkout

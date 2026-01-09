@@ -17,6 +17,11 @@ appraise 'minitest5' do
   gem 'minitest', '5.10.0'
 end
 
+appraise 'minitest6' do
+  gem 'rake'
+  gem 'minitest', '~> 6.0'
+end
+
 appraise 'rspec3' do
   gem 'rspec', '~> 3.12'
 end
